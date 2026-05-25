@@ -522,6 +522,12 @@ tbody tr:hover {
     font-size: 14px;
     font-weight: 700;
     text-transform: uppercase;
+    text-align: center;
+    line-height: 1.2;
+}
+
+.text-center {
+    text-align: center !important;
 }
 
 /* Dynamic badges depending on ClinVar clinical_significance */

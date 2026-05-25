@@ -312,8 +312,8 @@ document.addEventListener('DOMContentLoaded', () => {
                     
                     tr.innerHTML = `
                         <td style="font-family: var(--font-mono); font-weight: 500;">${v.title}</td>
-                        <td><span class="${badgeClass}" style="font-size:10px; padding: 2px 6px;">${v.clinical_significance}</span></td>
-                        <td style="color: var(--neon-yellow);">${starsHtml}</td>
+                        <td class="text-center"><span class="${badgeClass}" style="font-size:10px; padding: 4px 8px;">${v.clinical_significance}</span></td>
+                        <td class="text-center" style="color: var(--neon-yellow);">${starsHtml}</td>
                         <td>${v.last_evaluated || 'N/A'}</td>
                     `;
                     geneVariantsList.appendChild(tr);
