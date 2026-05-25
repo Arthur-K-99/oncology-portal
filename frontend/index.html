@@ -330,30 +330,46 @@
                     </div>
                     <div class="card-body">
                         <!-- Protein details panel -->
-                        <div class="protein-meta-panel" style="display: flex; flex-direction: column; gap: 8px; margin-bottom: 16px; border-bottom: 1px solid rgba(255,255,255,0.03); padding-bottom: 12px; font-size: 13px;">
-                            <div style="display: flex; justify-content: space-between;">
-                                <span style="color: var(--text-muted);">Protein Name:</span>
-                                <span id="protein-name" style="font-weight: 500; text-align: right; max-width: 70%; word-break: break-word;">N/A</span>
+                        <div class="protein-meta-panel">
+                            <div class="protein-meta-row">
+                                <span>Gene Symbol:</span>
+                                <span id="protein-gene">N/A</span>
                             </div>
-                            <div style="display: flex; justify-content: space-between;">
-                                <span style="color: var(--text-muted);">UniProt ID:</span>
-                                <a href="#" id="protein-uniprot" target="_blank" style="color: var(--neon-purple); text-decoration: none; font-family: var(--font-mono); font-weight: 500;">N/A</a>
+                            <div class="protein-meta-row">
+                                <span>Protein Name:</span>
+                                <span id="protein-name">N/A</span>
+                            </div>
+                            <div class="protein-meta-row">
+                                <span>UniProt ID:</span>
+                                <a href="#" id="protein-uniprot" target="_blank">N/A</a>
+                            </div>
+                            <div class="protein-meta-row">
+                                <span>UniProt Entry:</span>
+                                <span id="protein-entry">N/A</span>
+                            </div>
+                            <div class="protein-meta-row">
+                                <span>Organism:</span>
+                                <span>Homo sapiens</span>
+                            </div>
+                            <div class="protein-meta-row">
+                                <span>PDB Structures:</span>
+                                <span id="protein-pdb-count">0 resolved</span>
                             </div>
                         </div>
 
                         <!-- 3D Viewer Container and Control Overlays -->
-                        <div class="viewer-wrapper" style="position: relative; border-radius: 12px; overflow: hidden; border: 1px solid var(--card-border); background: #04070e;">
-                            <div id="mol-viewer" style="height: 320px; width: 100%; position: relative;"></div>
+                        <div class="viewer-wrapper">
+                            <div id="mol-viewer"></div>
                             
                             <!-- Style Controls Overlay -->
-                            <div class="viewer-controls" style="position: absolute; bottom: 10px; left: 10px; right: 10px; display: flex; flex-wrap: wrap; gap: 8px; background: rgba(13, 20, 38, 0.85); backdrop-filter: blur(8px); padding: 8px 12px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.05); font-size: 11px; z-index: 100;">
-                                <div style="display: flex; align-items: center; gap: 4px; flex: 1; min-width: 110px;">
+                            <div class="viewer-controls">
+                                <div class="viewer-control-group" style="flex: 1; min-width: 120px;">
                                     <span style="color: var(--text-muted);">Model:</span>
-                                    <select id="viewer-model" class="viewer-select" style="flex: 1; max-width: 100px;">
+                                    <select id="viewer-model" class="viewer-select" style="flex: 1;">
                                         <option value="alphafold">AlphaFold</option>
                                     </select>
                                 </div>
-                                <div style="display: flex; align-items: center; gap: 4px; flex-shrink: 0;">
+                                <div class="viewer-control-group">
                                     <span style="color: var(--text-muted);">Style:</span>
                                     <select id="viewer-style" class="viewer-select">
                                         <option value="cartoon">Cartoon</option>
@@ -362,7 +378,7 @@
                                         <option value="line">Line</option>
                                     </select>
                                 </div>
-                                <div style="display: flex; align-items: center; gap: 4px; flex-shrink: 0;">
+                                <div class="viewer-control-group">
                                     <span style="color: var(--text-muted);">Color:</span>
                                     <select id="viewer-color" class="viewer-select">
                                         <option value="spectrum">Spectrum</option>

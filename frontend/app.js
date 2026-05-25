@@ -338,7 +338,7 @@ document.addEventListener('DOMContentLoaded', () => {
         renderClinicalTrials(data.clinical_trials.trials);
 
         // 6. Render Macromolecular 3D Structure
-        renderProteinStructure(data.protein);
+        renderProteinStructure(data.protein, data.resolved_gene);
     }
 
     // ACMG Stars Rating converter
@@ -641,30 +641,44 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // 6. Macromolecular 3D Structure Card rendering using 3Dmol.js
-    function renderProteinStructure(proteinData) {
+    function renderProteinStructure(proteinData, resolvedGene) {
+        const geneEl = document.getElementById('protein-gene');
         const nameEl = document.getElementById('protein-name');
         const uniprotEl = document.getElementById('protein-uniprot');
+        const entryEl = document.getElementById('protein-entry');
+        const pdbCountEl = document.getElementById('protein-pdb-count');
         const modelSelect = document.getElementById('viewer-model');
         const styleSelect = document.getElementById('viewer-style');
         const colorSelect = document.getElementById('viewer-color');
         
         if (!proteinData) {
-            nameEl.textContent = 'Unavailable';
-            uniprotEl.textContent = 'N/A';
-            uniprotEl.href = '#';
+            if (geneEl) geneEl.textContent = resolvedGene || 'N/A';
+            if (nameEl) nameEl.textContent = 'Unavailable';
+            if (uniprotEl) {
+                uniprotEl.textContent = 'N/A';
+                uniprotEl.href = '#';
+            }
+            if (entryEl) entryEl.textContent = 'N/A';
+            if (pdbCountEl) pdbCountEl.textContent = '0 resolved';
             modelSelect.innerHTML = '<option value="alphafold">N/A</option>';
             document.getElementById('mol-viewer').innerHTML = '<div class="no-data">Protein structure data unavailable for this query.</div>';
             return;
         }
 
         // Set metadata
-        nameEl.textContent = proteinData.full_name || 'Unknown Protein';
-        uniprotEl.textContent = proteinData.accession;
-        uniprotEl.href = `https://www.uniprot.org/uniprotkb/${proteinData.accession}/entry`;
+        if (geneEl) geneEl.textContent = resolvedGene || 'N/A';
+        if (nameEl) nameEl.textContent = proteinData.full_name || 'Unknown Protein';
+        if (uniprotEl) {
+            uniprotEl.textContent = proteinData.accession;
+            uniprotEl.href = `https://www.uniprot.org/uniprotkb/${proteinData.accession}/entry`;
+        }
+        if (entryEl) entryEl.textContent = proteinData.entry_name || 'N/A';
+        
+        const pdbs = proteinData.pdb_ids || [];
+        if (pdbCountEl) pdbCountEl.textContent = `${pdbs.length} structure${pdbs.length === 1 ? '' : 's'} resolved`;
 
         // Populate models dropdown
         modelSelect.innerHTML = `<option value="alphafold">AlphaFold (Computed)</option>`;
-        const pdbs = proteinData.pdb_ids || [];
         pdbs.forEach(pdb => {
             const opt = document.createElement('option');
             opt.value = pdb.id;
@@ -690,7 +704,7 @@ document.addEventListener('DOMContentLoaded', () => {
             
             let downloadUrl = '';
             if (modelVal === 'alphafold') {
-                downloadUrl = `url:https://alphafold.ebi.ac.uk/files/AF-${proteinData.accession}-F1-model_v4.pdb`;
+                downloadUrl = `url:https://alphafold.ebi.ac.uk/files/AF-${proteinData.accession}-F1-model_v6.pdb`;
             } else {
                 downloadUrl = `pdb:${modelVal}`;
             }
@@ -698,11 +712,17 @@ document.addEventListener('DOMContentLoaded', () => {
             $3Dmol.download(downloadUrl, molViewerInstance, {}, function() {
                 // Apply Styles
                 const styleObj = {};
-                let colorScheme = colorVal;
-                if (colorVal === 'ss') {
-                    colorScheme = 'secondaryStructure';
+                const styleConfig = {};
+                
+                if (colorVal === 'spectrum') {
+                    styleConfig.color = 'spectrum';
+                } else if (colorVal === 'ss') {
+                    styleConfig.colorscheme = 'ssPyMol';
+                } else {
+                    styleConfig.colorscheme = colorVal;
                 }
-                styleObj[styleVal] = { colorscheme: colorScheme };
+                
+                styleObj[styleVal] = styleConfig;
                 
                 molViewerInstance.setStyle({}, styleObj);
                 molViewerInstance.zoomTo();

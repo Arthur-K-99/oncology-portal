@@ -405,7 +405,7 @@ header {
     }
     
     /* Full width dashboard blocks */
-    .trials-card {
+    .drug-card, .structure-card, .trials-card {
         grid-column: span 2;
     }
 }
@@ -1185,7 +1185,118 @@ tbody tr:hover {
 }
 
 /* Macromolecular 3D Structure Card Styles */
-.structure-card .viewer-select {
+.structure-card .card-body {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    padding: 24px;
+}
+
+@media (min-width: 768px) {
+    .structure-card .card-body {
+        display: grid;
+        grid-template-columns: 280px 1fr;
+        gap: 24px;
+        align-items: start;
+    }
+}
+
+.protein-meta-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    font-size: 13px;
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px solid var(--card-border);
+    border-radius: 8px;
+    padding: 16px;
+}
+
+.protein-meta-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 16px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+    padding-bottom: 8px;
+}
+
+.protein-meta-row:last-child {
+    border-bottom: none;
+    padding-bottom: 0;
+}
+
+.protein-meta-row span:first-child {
+    color: var(--text-muted);
+}
+
+.protein-meta-row span:last-child,
+.protein-meta-row a {
+    font-weight: 500;
+    text-align: right;
+    word-break: break-word;
+}
+
+#protein-gene {
+    font-family: var(--font-mono);
+    font-weight: 600;
+    color: var(--neon-blue);
+}
+
+#protein-uniprot {
+    color: var(--neon-purple);
+    text-decoration: none;
+    font-family: var(--font-mono);
+}
+
+#protein-uniprot:hover {
+    text-decoration: underline;
+}
+
+#protein-entry {
+    font-family: var(--font-mono);
+}
+
+.viewer-wrapper {
+    position: relative;
+    border-radius: 12px;
+    overflow: hidden;
+    border: 1px solid var(--card-border);
+    background: #04070e;
+    width: 100%;
+}
+
+#mol-viewer {
+    height: 320px;
+    width: 100%;
+    position: relative;
+}
+
+.viewer-controls {
+    position: absolute;
+    bottom: 10px;
+    left: 10px;
+    right: 10px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    background: rgba(13, 20, 38, 0.85);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    padding: 8px 12px;
+    border-radius: 8px;
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    font-size: 11px;
+    z-index: 100;
+}
+
+.viewer-control-group {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.viewer-controls .viewer-select {
     background: rgba(0, 0, 0, 0.45) !important;
     color: var(--text-primary) !important;
     border: 1px solid rgba(255, 255, 255, 0.08) !important;
@@ -1198,18 +1309,16 @@ tbody tr:hover {
     transition: border-color 0.2s ease;
 }
 
-.structure-card .viewer-select:focus {
+.viewer-controls .viewer-select:focus {
     border-color: var(--neon-blue) !important;
 }
 
-.structure-card .viewer-select option {
+.viewer-controls .viewer-select option {
     background: #0d1426;
     color: var(--text-primary);
 }
 
-.structure-card .mol-container {
-    height: 320px;
-    width: 100%;
-    position: relative;
+#viewer-model {
+    max-width: 140px;
 }
 
