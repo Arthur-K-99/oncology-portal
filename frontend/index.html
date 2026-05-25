@@ -62,11 +62,82 @@
 
         <!-- Loader Container -->
         <div id="loader" class="loader-container hidden">
-            <div class="spinner">
-                <div class="double-bounce1"></div>
-                <div class="double-bounce2"></div>
+            <div class="pipeline-loader-layout">
+                <!-- Left Pane: Pipeline steps -->
+                <div class="pipeline-steps">
+                    <div class="pipeline-track"></div>
+                    
+                    <div class="step-node" id="step-resolver">
+                        <div class="step-icon">
+                            <i data-lucide="dna"></i>
+                            <div class="step-spinner"></div>
+                        </div>
+                        <div class="step-content">
+                            <h4>Genomic & Pathogenicity Resolver</h4>
+                            <p class="step-detail" id="detail-resolver">Pending initialization...</p>
+                        </div>
+                    </div>
+                    
+                    <div class="step-node" id="step-expression">
+                        <div class="step-icon">
+                            <i data-lucide="bar-chart-3"></i>
+                            <div class="step-spinner"></div>
+                        </div>
+                        <div class="step-content">
+                            <h4>Transcriptome Atlas Expression</h4>
+                            <p class="step-detail" id="detail-expression">Waiting for gene resolution...</p>
+                        </div>
+                    </div>
+                    
+                    <div class="step-node" id="step-druggability">
+                        <div class="step-icon">
+                            <i data-lucide="target"></i>
+                            <div class="step-spinner"></div>
+                        </div>
+                        <div class="step-content">
+                            <h4>Target Druggability Analysis</h4>
+                            <p class="step-detail" id="detail-druggability">Waiting for expression data...</p>
+                        </div>
+                    </div>
+                    
+                    <div class="step-node" id="step-pharmacology">
+                        <div class="step-icon">
+                            <i data-lucide="pill"></i>
+                            <div class="step-spinner"></div>
+                        </div>
+                        <div class="step-content">
+                            <h4>Pharmacology & Binding Affinities</h4>
+                            <p class="step-detail" id="detail-pharmacology">Waiting for druggability profile...</p>
+                        </div>
+                    </div>
+                    
+                    <div class="step-node" id="step-trials">
+                        <div class="step-icon">
+                            <i data-lucide="map-pin"></i>
+                            <div class="step-spinner"></div>
+                        </div>
+                        <div class="step-content">
+                            <h4>Translational Clinical Trials</h4>
+                            <p class="step-detail" id="detail-trials">Waiting for drug listings...</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Right Pane: Terminal Console Logs -->
+                <div class="console-wrapper">
+                    <div class="console-header">
+                        <div class="console-dots">
+                            <span class="dot-red"></span>
+                            <span class="dot-yellow"></span>
+                            <span class="dot-green"></span>
+                        </div>
+                        <span class="console-title">Pipeline Query Console</span>
+                    </div>
+                    <div class="console-body" id="console-log">
+                        <div class="log-line log-system">OncoPortal shell initialized. Ready for query analysis.</div>
+                    </div>
+                </div>
             </div>
-            <p>Running pipeline query across ClinVar, dbSNP, GTEx, Open Targets, ChEMBL, & ClinicalTrials.gov...</p>
         </div>
 
         <!-- Initial Placeholder State -->

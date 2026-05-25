@@ -3,10 +3,11 @@ import re
 import json
 import logging
 import tempfile
+import asyncio
 import subprocess
-from typing import Optional, List, Dict, Any
+from typing import Optional, Dict, Any
 from fastapi import FastAPI, HTTPException, Query
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -16,11 +17,11 @@ logger = logging.getLogger("oncology-portal")
 
 app = FastAPI(
     title="Oncology Variant & Drug Repurposing Portal API",
-    description="Backend API mapping genetic variants and genes to therapeutic insights.",
-    version="1.0.0"
+    description="Backend API mapping genetic variants and genes to therapeutic insights via SSE streaming.",
+    version="2.0.0"
 )
 
-# Enable CORS for local development
+# Enable CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -45,7 +46,6 @@ def run_cli_tool(tool_name: str, subcommand: str, extra_args: list[str]) -> Opti
         logger.error(f"Script path not found for tool: {tool_name}")
         return None
         
-    # Create temp file for writing JSON output
     temp_fd, temp_path = tempfile.mkstemp(suffix=".json")
     os.close(temp_fd)
     
@@ -54,7 +54,6 @@ def run_cli_tool(tool_name: str, subcommand: str, extra_args: list[str]) -> Opti
         cmd = ["uv", "run", script_path]
         
         if tool_name == "opentargets":
-            # opentargets expects --output before the subcommand
             cmd.extend(["--output", temp_path, subcommand])
             cmd.extend(extra_args)
         elif tool_name == "dbsnp":
@@ -62,12 +61,10 @@ def run_cli_tool(tool_name: str, subcommand: str, extra_args: list[str]) -> Opti
             cmd.extend(extra_args)
             cmd.extend(["--output", temp_path])
         else:
-            # clinvar, gtex, chembl, clinicaltrials expect subcommand, args, then --output
             cmd.extend([subcommand])
             cmd.extend(extra_args)
             cmd.extend(["--output", temp_path])
             
-        logger.info(f"Executing: {' '.join(cmd)}")
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=90)
         
         if result.returncode != 0:
@@ -75,15 +72,11 @@ def run_cli_tool(tool_name: str, subcommand: str, extra_args: list[str]) -> Opti
             return None
             
         if not os.path.exists(temp_path) or os.path.getsize(temp_path) == 0:
-            logger.error(f"CLI tool '{tool_name}' did not write output or file is empty")
             return None
             
         with open(temp_path, "r", encoding="utf-8") as f:
             return json.load(f)
             
-    except subprocess.TimeoutExpired:
-        logger.error(f"CLI tool '{tool_name}' timed out after 90 seconds.")
-        return None
     except Exception as e:
         logger.error(f"Error running CLI tool '{tool_name}': {e}")
         return None
@@ -91,24 +84,18 @@ def run_cli_tool(tool_name: str, subcommand: str, extra_args: list[str]) -> Opti
         if os.path.exists(temp_path):
             os.remove(temp_path)
 
-# Extract chromosome from RefSeq accession (e.g., NC_000019.10 -> 19, NC_000023.11 -> X)
 def parse_refseq_chrom(seq_id: str) -> str:
     match = re.search(r"NC_0000(\d+)\.", seq_id)
     if match:
         num = int(match.group(1))
-        if num == 23:
-            return "X"
-        if num == 24:
-            return "Y"
+        if num == 23: return "X"
+        if num == 24: return "Y"
         return str(num)
     return seq_id
 
-@app.get("/api/search")
-def search(query: str = Query(..., description="Gene symbol (e.g. EGFR) or Variant rsID (e.g. rs121913343)")):
+# Async generator for Server-Sent Events (SSE) progress streaming
+async def search_stream_generator(query: str):
     query = query.strip()
-    if not query:
-        raise HTTPException(status_code=400, detail="Query cannot be empty.")
-        
     is_variant = bool(re.match(r"^rs\d+$", query, re.IGNORECASE))
     
     response_data: Dict[str, Any] = {
@@ -142,67 +129,60 @@ def search(query: str = Query(..., description="Gene symbol (e.g. EGFR) or Varia
     rsid = None
     
     # -------------------------------------------------------------
-    # 1. RESOLVE GENE AND VARIANT DETAILS
+    # STEP 1: GENOMIC RESOLVER (dbSNP / ClinVar)
     # -------------------------------------------------------------
+    yield f"data: {json.dumps({'step': 'resolver', 'type': 'status', 'message': 'Running Genomic & Pathogenicity Resolver...'})}\n\n"
+    await asyncio.sleep(0.05)
+    
     if is_variant:
         rsid = query.lower()
-        logger.info(f"Processing variant rsID search: {rsid}")
+        yield f"data: {json.dumps({'step': 'resolver', 'type': 'log', 'message': f'GET https://api.ncbi.nlm.nih.gov/variation/v0/refsnp/{rsid}'})}\n\n"
         
-        # Query dbSNP
-        dbsnp_data = run_cli_tool("dbsnp", "get-variant", [rsid])
+        dbsnp_data = await asyncio.to_thread(run_cli_tool, "dbsnp", "get-variant", [rsid])
         if dbsnp_data and "error" not in dbsnp_data:
             response_data["dbsnp"] = dbsnp_data
-            # Extract associated gene symbol
             genes = dbsnp_data.get("genes", [])
             if genes:
                 resolved_gene = genes[0]
                 response_data["resolved_gene"] = resolved_gene
-                logger.info(f"Resolved rsID {rsid} to gene {resolved_gene}")
-                
-            # Reconstruct coordinate notation chrom:pos:ref>alt
+                yield f"data: {json.dumps({'step': 'resolver', 'type': 'log', 'message': f'dbSNP: Variant associated with gene {resolved_gene}'})}\n\n"
+            
             placements = dbsnp_data.get("placements", [])
             if placements:
                 placement = placements[0]
                 chrom = parse_refseq_chrom(placement.get("seq_id", ""))
                 alleles = placement.get("alleles", [])
-                ref_allele = ""
-                alt_allele = ""
-                pos_1based = None
-                
-                # Find the variant allele
+                ref_allele, alt_allele, pos_1based = "", "", None
                 for allele in alleles:
                     if allele.get("is_variant"):
                         alt_allele = allele.get("inserted_sequence", "")
                         ref_allele = allele.get("deleted_sequence", "")
-                        # dbSNP SPDI position is 0-based
                         if allele.get("position") is not None:
                             pos_1based = int(allele.get("position")) + 1
                             break
-                            
                 if pos_1based and ref_allele and alt_allele:
                     response_data["dbsnp"]["coordinate"] = f"chr{chrom}:{pos_1based}:{ref_allele}>{alt_allele}"
-        else:
-            logger.warning(f"Could not resolve variant in dbSNP: {rsid}")
-            
-        # Query ClinVar details for this rsID
-        clinvar_search = run_cli_tool("clinvar", "search", ["--query", rsid])
+                    yield f"data: {json.dumps({'step': 'resolver', 'type': 'log', 'message': f'dbSNP: Resolved GRCh38 coordinate chr{chrom}:{pos_1based}:{ref_allele}>{alt_allele}'})}\n\n"
+        
+        # ClinVar search by rsID
+        yield f"data: {json.dumps({'step': 'resolver', 'type': 'log', 'message': f'GET https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi?db=clinvar&term={rsid}'})}\n\n"
+        clinvar_search = await asyncio.to_thread(run_cli_tool, "clinvar", "search", ["--query", rsid])
         if clinvar_search and clinvar_search.get("variant_ids"):
             var_ids = clinvar_search.get("variant_ids")
             if var_ids:
                 var_id = var_ids[0]
-                clinvar_sum = run_cli_tool("clinvar", "summary", ["--variant_ids", var_id])
+                yield f"data: {json.dumps({'step': 'resolver', 'type': 'log', 'message': f'GET https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi?db=clinvar&id={var_id}'})}\n\n"
+                clinvar_sum = await asyncio.to_thread(run_cli_tool, "clinvar", "summary", ["--variant_ids", var_id])
                 if clinvar_sum and isinstance(clinvar_sum, list) and len(clinvar_sum) > 0:
                     response_data["clinvar"]["variant_summary"] = clinvar_sum[0]
-                    # Fallback gene resolution from ClinVar if dbSNP missed it
                     if not resolved_gene:
                         cv_genes = clinvar_sum[0].get("genes", [])
                         if cv_genes:
                             resolved_gene = cv_genes[0].get("symbol")
                             response_data["resolved_gene"] = resolved_gene
-                            logger.info(f"Resolved rsID {rsid} to gene {resolved_gene} via ClinVar")
-                            
-                # Get coordinates from ClinVar evidence
-                clinvar_ev = run_cli_tool("clinvar", "evidence", ["--variant_id", var_id])
+                
+                # ClinVar evidence
+                clinvar_ev = await asyncio.to_thread(run_cli_tool, "clinvar", "evidence", ["--variant_id", var_id])
                 if clinvar_ev and "allele_info" in clinvar_ev:
                     allele_info = clinvar_ev.get("allele_info", {})
                     chrom = allele_info.get("chromosome", "")
@@ -211,74 +191,99 @@ def search(query: str = Query(..., description="Gene symbol (e.g. EGFR) or Varia
                     alt = allele_info.get("alternate_allele")
                     if chrom and pos and ref and alt:
                         response_data["clinvar"]["coordinate"] = f"chr{chrom}:{pos}:{ref}>{alt}"
+        
+        res_gene_name = resolved_gene or "Unknown Gene"
+        res_msg = f"Resolved: {query.upper()} -> {res_gene_name}"
+        yield f"data: {json.dumps({'step': 'resolver', 'type': 'status', 'message': res_msg})}\n\n"
     else:
         resolved_gene = query.upper()
         response_data["resolved_gene"] = resolved_gene
-        logger.info(f"Processing gene symbol search: {resolved_gene}")
+        yield f"data: {json.dumps({'step': 'resolver', 'type': 'log', 'message': f'GET https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi?db=clinvar&term={resolved_gene}[gene]+AND+pathogenic[clinsig]'})}\n\n"
         
-        # Query ClinVar for top pathogenic variants in this gene
-        clinvar_search = run_cli_tool("clinvar", "search", ["--query", f"{resolved_gene}[gene] AND pathogenic[clinsig]", "--retmax", "5"])
+        clinvar_search = await asyncio.to_thread(run_cli_tool, "clinvar", "search", ["--query", f"{resolved_gene}[gene] AND pathogenic[clinsig]", "--retmax", "5"])
         if clinvar_search and clinvar_search.get("variant_ids"):
             var_ids = clinvar_search.get("variant_ids")
             if var_ids:
-                clinvar_sums = run_cli_tool("clinvar", "summary", ["--variant_ids"] + var_ids)
+                yield f"data: {json.dumps({'step': 'resolver', 'type': 'log', 'message': f'ClinVar: Found {len(var_ids)} pathogenic variants. Summarizing...'})}\n\n"
+                clinvar_sums = await asyncio.to_thread(run_cli_tool, "clinvar", "summary", ["--variant_ids"] + var_ids)
                 if clinvar_sums and isinstance(clinvar_sums, list):
                     response_data["clinvar"]["pathogenic_variants"] = clinvar_sums
-
+        yield f"data: {json.dumps({'step': 'resolver', 'type': 'status', 'message': f'Gene Pathogenicity resolved for {resolved_gene}'})}\n\n"
+    
     # -------------------------------------------------------------
-    # 2. RUN GENE-LEVEL PIPELINE IF GENE IS RESOLVED
+    # STEP 2: TRANSCRIPTOME ATLAS (GTEx)
     # -------------------------------------------------------------
+    yield f"data: {json.dumps({'step': 'expression', 'type': 'status', 'message': 'Loading Baseline Tissue Expression Profiles...'})}\n\n"
+    await asyncio.sleep(0.05)
+    
     if resolved_gene:
-        # A. GTEx Baseline Expression
-        gtex_id_data = run_cli_tool("gtex", "resolve-gencode-id", [resolved_gene])
+        yield f"data: {json.dumps({'step': 'expression', 'type': 'log', 'message': f'GET https://gtexportal.org/api/v2/gene?geneId={resolved_gene}'})}\n\n"
+        gtex_id_data = await asyncio.to_thread(run_cli_tool, "gtex", "resolve-gencode-id", [resolved_gene])
+        
         if gtex_id_data and "gencode_id" in gtex_id_data:
             gencode_id = gtex_id_data["gencode_id"]
             response_data["gtex"]["gencode_id"] = gencode_id
+            yield f"data: {json.dumps({'step': 'expression', 'type': 'log', 'message': f'GTEx: Resolved GENCODE ID {gencode_id}'})}\n\n"
             
-            # Fetch median expressions
-            gtex_expr = run_cli_tool("gtex", "get-median-expression", [gencode_id])
+            yield f"data: {json.dumps({'step': 'expression', 'type': 'log', 'message': f'GET https://gtexportal.org/api/v2/expression/medianGeneExpression?gencodeId={gencode_id}'})}\n\n"
+            gtex_expr = await asyncio.to_thread(run_cli_tool, "gtex", "get-median-expression", [gencode_id])
             if gtex_expr and isinstance(gtex_expr, list):
                 response_data["gtex"]["expression"] = gtex_expr
-                
-        # B. Open Targets Druggability & Disease Associations
-        # Strip version suffix (e.g. ENSG00000130203.10 -> ENSG00000130203)
-        ensembl_id = None
-        if response_data["gtex"]["gencode_id"]:
-            ensembl_id = response_data["gtex"]["gencode_id"].split(".")[0]
-            
-        if ensembl_id:
-            # Get Druggability
-            ot_drug = run_cli_tool("opentargets", "get-target-druggability", [ensembl_id])
-            if ot_drug and "target" in ot_drug:
-                response_data["opentargets"]["druggability"] = ot_drug["target"]
-                
-            # Get Associated Diseases
-            ot_diseases = run_cli_tool("opentargets", "get-associated-diseases", [ensembl_id])
-            if ot_diseases and "target" in ot_diseases:
-                assoc = ot_diseases["target"].get("associatedDiseases", {})
-                rows = assoc.get("rows", [])
-                
-                # Filter for oncology-related diseases (contains cancer, tumor, neoplasm, blastoma, leukemia, etc.)
-                cancer_pattern = re.compile(r"cancer|tumor|neoplasm|malignan|leukemia|lymphoma|myeloma|carcinoma|sarcoma|melanoma|glioma|blastoma", re.IGNORECASE)
-                oncology_rows = []
-                for row in rows:
-                    disease_name = row.get("disease", {}).get("name", "")
-                    if cancer_pattern.search(disease_name):
-                        oncology_rows.append(row)
-                        
-                # If we don't have enough oncology rows, return general associations
-                if len(oncology_rows) < 5:
-                    response_data["opentargets"]["diseases"] = rows[:10]
-                else:
-                    response_data["opentargets"]["diseases"] = oncology_rows[:10]
+                yield f"data: {json.dumps({'step': 'expression', 'type': 'log', 'message': f'GTEx: Loaded baseline expressions for {len(gtex_expr)} tissues.'})}\n\n"
+        
+        yield f"data: {json.dumps({'step': 'expression', 'type': 'status', 'message': 'Tissue expression profile loaded.'})}\n\n"
+    else:
+        yield f"data: {json.dumps({'step': 'expression', 'type': 'status', 'message': 'Skipped expression loader (unresolved gene).'})}\n\n"
 
-        # C. ChEMBL Target, Drug Mechanisms & Bioactivities
-        chembl_target = run_cli_tool("chembl", "target", ["--search", resolved_gene])
-        target_chembl_id = None
+    # -------------------------------------------------------------
+    # STEP 3: TARGET DRUGGABILITY (Open Targets)
+    # -------------------------------------------------------------
+    yield f"data: {json.dumps({'step': 'druggability', 'type': 'status', 'message': 'Analyzing Target Druggability & Diseases...'})}\n\n"
+    await asyncio.sleep(0.05)
+    
+    ensembl_id = None
+    if response_data["gtex"]["gencode_id"]:
+        ensembl_id = response_data["gtex"]["gencode_id"].split(".")[0]
+        
+    if ensembl_id:
+        yield f"data: {json.dumps({'step': 'druggability', 'type': 'log', 'message': f'POST https://api.platform.opentargets.org/api/v4/graphql (Query: target tractability for {ensembl_id})'})}\n\n"
+        ot_drug = await asyncio.to_thread(run_cli_tool, "opentargets", "get-target-druggability", [ensembl_id])
+        if ot_drug and "target" in ot_drug:
+            response_data["opentargets"]["druggability"] = ot_drug["target"]
+            
+        yield f"data: {json.dumps({'step': 'druggability', 'type': 'log', 'message': f'POST https://api.platform.opentargets.org/api/v4/graphql (Query: associated diseases for {ensembl_id})'})}\n\n"
+        ot_diseases = await asyncio.to_thread(run_cli_tool, "opentargets", "get-associated-diseases", [ensembl_id])
+        if ot_diseases and "target" in ot_diseases:
+            assoc = ot_diseases["target"].get("associatedDiseases", {})
+            rows = assoc.get("rows", [])
+            cancer_pattern = re.compile(r"cancer|tumor|neoplasm|malignan|leukemia|lymphoma|myeloma|carcinoma|sarcoma|melanoma|glioma|blastoma", re.IGNORECASE)
+            oncology_rows = [row for row in rows if cancer_pattern.search(row.get("disease", {}).get("name", ""))]
+            
+            if len(oncology_rows) < 5:
+                response_data["opentargets"]["diseases"] = rows[:10]
+            else:
+                response_data["opentargets"]["diseases"] = oncology_rows[:10]
+            num_diseases = len(response_data["opentargets"]["diseases"])
+            ot_log_msg = f"Open Targets: Found {num_diseases} cancer associations."
+            yield f"data: {json.dumps({'step': 'druggability', 'type': 'log', 'message': ot_log_msg})}\n\n"
+            
+        yield f"data: {json.dumps({'step': 'druggability', 'type': 'status', 'message': 'Target druggability analysis completed.'})}\n\n"
+    else:
+        yield f"data: {json.dumps({'step': 'druggability', 'type': 'status', 'message': 'Skipped druggability (unresolved Ensembl ID).'})}\n\n"
+
+    # -------------------------------------------------------------
+    # STEP 4: PHARMACOLOGY & BINDING (ChEMBL)
+    # -------------------------------------------------------------
+    yield f"data: {json.dumps({'step': 'pharmacology', 'type': 'status', 'message': 'Mining Pharmacology & Compound Binding Affinities...'})}\n\n"
+    await asyncio.sleep(0.05)
+    
+    target_chembl_id = None
+    if resolved_gene:
+        yield f"data: {json.dumps({'step': 'pharmacology', 'type': 'log', 'message': f'GET https://www.ebi.ac.uk/chembl/api/data/target.json?q={resolved_gene}'})}\n\n"
+        chembl_target = await asyncio.to_thread(run_cli_tool, "chembl", "target", ["--search", resolved_gene])
         
         if chembl_target and "targets" in chembl_target:
             targets = chembl_target["targets"]
-            # Look for human single protein target matching the gene symbol
             for t in targets:
                 if t.get("target_type") == "SINGLE PROTEIN" and t.get("tax_id") == 9606:
                     pref_name = t.get("pref_name", "").upper()
@@ -286,8 +291,6 @@ def search(query: str = Query(..., description="Gene symbol (e.g. EGFR) or Varia
                         target_chembl_id = t.get("target_chembl_id")
                         response_data["chembl"]["target_id"] = target_chembl_id
                         break
-            
-            # Fallback to first single protein human target if no exact gene match
             if not target_chembl_id:
                 for t in targets:
                     if t.get("target_type") == "SINGLE PROTEIN" and t.get("tax_id") == 9606:
@@ -296,18 +299,19 @@ def search(query: str = Query(..., description="Gene symbol (e.g. EGFR) or Varia
                         break
                         
         if target_chembl_id:
-            # Query approved/clinical mechanisms
-            chembl_mech = run_cli_tool("chembl", "mechanism", ["--filter", f"target_chembl_id={target_chembl_id}", "--limit", "30"])
+            yield f"data: {json.dumps({'step': 'pharmacology', 'type': 'log', 'message': f'ChEMBL: Target resolved to {target_chembl_id}'})}\n\n"
+            
+            # Fetch approved drugs mechanisms
+            yield f"data: {json.dumps({'step': 'pharmacology', 'type': 'log', 'message': f'GET https://www.ebi.ac.uk/chembl/api/data/mechanism.json?target_chembl_id={target_chembl_id}'})}\n\n"
+            chembl_mech = await asyncio.to_thread(run_cli_tool, "chembl", "mechanism", ["--filter", f"target_chembl_id={target_chembl_id}", "--limit", "30"])
             if chembl_mech and "mechanisms" in chembl_mech:
                 mechs = chembl_mech["mechanisms"]
-                # Resolve drug molecule names for these mechanisms in a batch if possible, or extract details
                 mol_ids = list(set([m.get("molecule_chembl_id") for m in mechs if m.get("molecule_chembl_id")]))
-                
                 if mol_ids:
-                    # Query molecule names for these IDs
-                    mol_ids_str = ";".join(mol_ids[:15])  # Cap at 15 molecules
-                    chembl_mols = run_cli_tool("chembl", "molecule", ["--ids", mol_ids_str])
-                    
+                    mols_str = ";".join(mol_ids[:5])
+                    chembl_log_msg = f"GET https://www.ebi.ac.uk/chembl/api/data/molecule/set/{mols_str}..."
+                    yield f"data: {json.dumps({'step': 'pharmacology', 'type': 'log', 'message': chembl_log_msg})}\n\n"
+                    chembl_mols = await asyncio.to_thread(run_cli_tool, "chembl", "molecule", ["--ids", ";".join(mol_ids[:15])])
                     mol_map = {}
                     if chembl_mols and "molecules" in chembl_mols:
                         for mol in chembl_mols["molecules"]:
@@ -316,46 +320,52 @@ def search(query: str = Query(..., description="Gene symbol (e.g. EGFR) or Varia
                                 "max_phase": mol.get("max_phase", 0),
                                 "molecule_type": mol.get("molecule_type")
                             }
-                            
                     for m in mechs:
                         m_id = m.get("molecule_chembl_id")
-                        m["drug_details"] = mol_map.get(m_id, {
-                            "pref_name": m_id,
-                            "max_phase": None,
-                            "molecule_type": None
-                        })
+                        m["drug_details"] = mol_map.get(m_id, {"pref_name": m_id, "max_phase": None, "molecule_type": None})
                 response_data["chembl"]["mechanisms"] = mechs
                 
-            # Query bioactivity values (IC50)
-            chembl_act = run_cli_tool("chembl", "activity", ["--filter", f"target_chembl_id={target_chembl_id}", "standard_type=IC50", "--normalize", "--limit", "20"])
+            # Fetch bioactivities
+            yield f"data: {json.dumps({'step': 'pharmacology', 'type': 'log', 'message': f'GET https://www.ebi.ac.uk/chembl/api/data/activity.json?target_chembl_id={target_chembl_id}&standard_type=IC50'})}\n\n"
+            chembl_act = await asyncio.to_thread(run_cli_tool, "chembl", "activity", ["--filter", f"target_chembl_id={target_chembl_id}", "standard_type=IC50", "--normalize", "--limit", "20"])
             if chembl_act and "activities" in chembl_act:
-                # Filter for activities with normalized value and sort by binding affinity (lowest IC50 is strongest binding)
                 acts = chembl_act["activities"]
                 valid_acts = [a for a in acts if a.get("normalized_value_nM") is not None]
                 valid_acts.sort(key=lambda x: x["normalized_value_nM"])
                 response_data["chembl"]["activities"] = valid_acts[:15]
+                num_acts = len(response_data["chembl"]["activities"])
+                chembl_act_msg = f"ChEMBL: Extracted {num_acts} binding values."
+                yield f"data: {json.dumps({'step': 'pharmacology', 'type': 'log', 'message': chembl_act_msg})}\n\n"
+                
+        yield f"data: {json.dumps({'step': 'pharmacology', 'type': 'status', 'message': 'Pharmacology details compiled successfully.'})}\n\n"
+    else:
+        yield f"data: {json.dumps({'step': 'pharmacology', 'type': 'status', 'message': 'Skipped pharmacology (unresolved target).'})}\n\n"
 
-        # D. ClinicalTrials.gov Recruiting Trials
-        # First query: search for condition="cancer" and intervention=gene_symbol
-        trials_search = run_cli_tool("clinicaltrials", "search", [
+    # -------------------------------------------------------------
+    # STEP 5: TRANSLATIONAL MATCHES (ClinicalTrials.gov)
+    # -------------------------------------------------------------
+    yield f"data: {json.dumps({'step': 'trials', 'type': 'status', 'message': 'Screening Recruiting Clinical Trials...'})}\n\n"
+    await asyncio.sleep(0.05)
+    
+    if resolved_gene:
+        yield f"data: {json.dumps({'step': 'trials', 'type': 'log', 'message': f'GET https://clinicaltrials.gov/api/v2/studies?query.cond=cancer&query.intr={resolved_gene}&query.status=RECRUITING'})}\n\n"
+        trials_search = await asyncio.to_thread(run_cli_tool, "clinicaltrials", "search", [
             "--condition", "cancer",
             "--intervention", resolved_gene,
             "--status", "RECRUITING",
             "--limit", "15"
         ])
         
-        # If no trials are found, try searching condition="neoplasm" and intervention=gene_symbol
         if not trials_search or not trials_search.get("studies"):
-            trials_search = run_cli_tool("clinicaltrials", "search", [
+            trials_search = await asyncio.to_thread(run_cli_tool, "clinicaltrials", "search", [
                 "--condition", "neoplasm",
                 "--intervention", resolved_gene,
                 "--status", "RECRUITING",
                 "--limit", "15"
             ])
             
-        # Fallback to search condition=gene_symbol if still empty
         if not trials_search or not trials_search.get("studies"):
-            trials_search = run_cli_tool("clinicaltrials", "search", [
+            trials_search = await asyncio.to_thread(run_cli_tool, "clinicaltrials", "search", [
                 "--condition", resolved_gene,
                 "--status", "RECRUITING",
                 "--limit", "15"
@@ -373,7 +383,6 @@ def search(query: str = Query(..., description="Gene symbol (e.g. EGFR) or Varia
                 design = protocol.get("designModule", {})
                 locations_mod = protocol.get("contactsLocationsModule", {})
                 
-                # Extract coordinates and cities
                 locations = []
                 for loc in locations_mod.get("locations", []):
                     geo = loc.get("geoPoint")
@@ -397,14 +406,43 @@ def search(query: str = Query(..., description="Gene symbol (e.g. EGFR) or Varia
                     "locations": locations
                 })
             response_data["clinical_trials"]["trials"] = parsed_trials
+            trials_log_msg = f"ClinicalTrials.gov: Mapped {len(parsed_trials)} recruiting trials."
+            yield f"data: {json.dumps({'step': 'trials', 'type': 'log', 'message': trials_log_msg})}\n\n"
+            
+        yield f"data: {json.dumps({'step': 'trials', 'type': 'status', 'message': 'Clinical trials screening completed.'})}\n\n"
+    else:
+        yield f"data: {json.dumps({'step': 'trials', 'type': 'status', 'message': 'Skipped clinical trials (unresolved query).'})}\n\n"
 
-    # If we could not resolve a gene at all, throw a 404
-    if is_variant and not response_data["dbsnp"] and not response_data["clinvar"]["variant_summary"]:
-        raise HTTPException(status_code=404, detail=f"Variant rsID '{query}' could not be resolved.")
-    elif not is_variant and not resolved_gene:
-        raise HTTPException(status_code=404, detail=f"Gene symbol '{query}' could not be resolved.")
-        
-    return response_data
+    # -------------------------------------------------------------
+    # PIPELINE COMPLETE: STREAM DATA
+    # -------------------------------------------------------------
+    yield f"data: {json.dumps({'step': 'complete', 'type': 'status', 'message': 'Aggregating files and launching dashboard...', 'data': response_data})}\n\n"
+
+@app.get("/api/search/stream")
+def search_stream(query: str = Query(..., description="Query gene symbol or variant rsID")):
+    return StreamingResponse(
+        search_stream_generator(query),
+        media_type="text/event-stream"
+    )
+
+# Keeping the synchronous fallback endpoint for verify_backend.py compatibility
+@app.get("/api/search")
+async def search_sync(query: str = Query(...)):
+    data = None
+    async for item in search_stream_generator(query):
+        if item.startswith("data:"):
+            raw_json = item[5:].strip()
+            if raw_json:
+                try:
+                    parsed = json.loads(raw_json)
+                    if parsed.get("step") == "complete":
+                        data = parsed.get("data")
+                except json.JSONDecodeError:
+                    continue
+                    
+    if not data:
+        raise HTTPException(status_code=404, detail="Query could not be resolved.")
+    return data
 
 # Mount frontend directory for static assets
 frontend_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "frontend")

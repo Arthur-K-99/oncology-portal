@@ -62,8 +62,59 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     });
 
-    // Form Search Submission
-    searchForm.addEventListener('submit', async (e) => {
+    // Console Log & Pipeline helpers
+    const consoleLog = document.getElementById('console-log');
+    const pipelineSteps = ['resolver', 'expression', 'druggability', 'pharmacology', 'trials'];
+    
+    function appendConsoleLog(text, className) {
+        const line = document.createElement('div');
+        line.className = `log-line ${className || 'log-system'}`;
+        line.textContent = `[${new Date().toLocaleTimeString()}] ${text}`;
+        consoleLog.appendChild(line);
+        consoleLog.scrollTop = consoleLog.scrollHeight;
+    }
+
+    function resetPipeline() {
+        pipelineSteps.forEach(step => {
+            const node = document.getElementById(`step-${step}`);
+            const detail = document.getElementById(`detail-${step}`);
+            node.className = 'step-node'; // remove running / completed
+            
+            if (step === 'resolver') detail.textContent = 'Pending initialization...';
+            else if (step === 'expression') detail.textContent = 'Waiting for gene resolution...';
+            else if (step === 'druggability') detail.textContent = 'Waiting for expression data...';
+            else if (step === 'pharmacology') detail.textContent = 'Waiting for druggability profile...';
+            else if (step === 'trials') detail.textContent = 'Waiting for drug listings...';
+        });
+        
+        consoleLog.innerHTML = '<div class="log-line log-system">OncoPortal shell initialized. Ready for query analysis.</div>';
+    }
+    
+    function updatePipelineProgress(currentStep, isRunning, message) {
+        const currentIndex = pipelineSteps.indexOf(currentStep);
+        
+        pipelineSteps.forEach((step, idx) => {
+            const node = document.getElementById(`step-${step}`);
+            const detail = document.getElementById(`detail-${step}`);
+            
+            if (idx < currentIndex) {
+                node.className = 'step-node completed';
+            } else if (idx === currentIndex) {
+                if (isRunning) {
+                    node.className = 'step-node running';
+                    detail.textContent = message;
+                } else {
+                    node.className = 'step-node completed';
+                    detail.textContent = message;
+                }
+            } else {
+                node.className = 'step-node';
+            }
+        });
+    }
+
+    // Form Search Submission via EventSource (SSE)
+    searchForm.addEventListener('submit', (e) => {
         e.preventDefault();
         const query = searchInput.value.trim();
         if (!query) return;
@@ -72,24 +123,58 @@ document.addEventListener('DOMContentLoaded', () => {
         placeholderState.classList.add('hidden');
         dashboard.classList.add('hidden');
         loader.classList.remove('hidden');
+        
+        // Reset pipeline and console
+        resetPipeline();
+        appendConsoleLog(`Establishing connection to query pipeline for: ${query.toUpperCase()}...`, 'log-system');
 
-        try {
-            const response = await fetch(`/api/search?query=${encodeURIComponent(query)}`);
-            if (!response.ok) {
-                const errData = await response.json();
-                throw new Error(errData.detail || 'Genomic pipeline failed.');
+        // Connect to FastAPI SSE Stream
+        const eventSource = new EventSource(`/api/search/stream?query=${encodeURIComponent(query)}`);
+
+        eventSource.onmessage = (event) => {
+            try {
+                const data = JSON.parse(event.data);
+                
+                if (data.step === 'complete') {
+                    appendConsoleLog(data.message, 'log-success');
+                    appendConsoleLog('Query pipeline stream completed successfully. Launching dashboard.', 'log-success');
+                    eventSource.close();
+                    
+                    // Cache data
+                    currentData = data.data;
+                    
+                    // Render and transition with a tiny delay to let the user see the complete state
+                    setTimeout(() => {
+                        renderDashboard(currentData);
+                        loader.classList.add('hidden');
+                        dashboard.classList.remove('hidden');
+                    }, 800);
+                    
+                } else {
+                    // Update steps and log to console
+                    if (data.type === 'status') {
+                        const isDone = data.message.includes('loaded') || data.message.includes('completed') || data.message.includes('resolved');
+                        updatePipelineProgress(data.step, !isDone, data.message);
+                        appendConsoleLog(data.message, 'log-success');
+                    } else if (data.type === 'log') {
+                        const isRequest = data.message.startsWith('GET') || data.message.startsWith('POST');
+                        appendConsoleLog(data.message, isRequest ? 'log-api' : 'log-system');
+                    }
+                }
+            } catch (err) {
+                appendConsoleLog(`Error parsing stream event: ${err.message}`, 'log-warning');
             }
-            
-            currentData = await response.json();
-            renderDashboard(currentData);
-            
-            loader.classList.add('hidden');
-            dashboard.classList.remove('hidden');
-        } catch (error) {
-            loader.classList.add('hidden');
-            placeholderState.classList.remove('hidden');
-            alert(error.message);
-        }
+        };
+
+        eventSource.onerror = (err) => {
+            eventSource.close();
+            appendConsoleLog('Pipeline pipeline connection lost or failed. Query cancelled.', 'log-warning');
+            setTimeout(() => {
+                loader.classList.add('hidden');
+                placeholderState.classList.remove('hidden');
+                alert(`Search failed: Connection to streaming endpoint lost.`);
+            }, 1500);
+        };
     });
 
     // Tab Switching Logic

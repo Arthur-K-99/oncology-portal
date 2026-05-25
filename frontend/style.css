@@ -946,3 +946,235 @@ tbody tr:hover {
     font-style: italic;
     font-size: 13.5px;
 }
+
+/* Pipeline Loader Layout and Animations */
+.pipeline-loader-layout {
+    display: flex;
+    flex-direction: column;
+    gap: 32px;
+    width: 100%;
+    max-width: 1100px;
+    margin: 20px auto;
+    text-align: left;
+}
+
+@media (min-width: 768px) {
+    .pipeline-loader-layout {
+        flex-direction: row;
+        align-items: stretch;
+    }
+}
+
+.pipeline-steps {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+    position: relative;
+    padding-left: 20px;
+}
+
+.pipeline-track {
+    position: absolute;
+    left: 35px;
+    top: 16px;
+    bottom: 16px;
+    width: 2px;
+    background: rgba(255, 255, 255, 0.05);
+    z-index: 1;
+}
+
+.step-node {
+    display: flex;
+    gap: 20px;
+    align-items: flex-start;
+    z-index: 2;
+    opacity: 0.3;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.step-node.running {
+    opacity: 1;
+    transform: translateX(4px);
+}
+
+.step-node.completed {
+    opacity: 1;
+}
+
+.step-icon {
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    background: #0a0f1d;
+    border: 1px solid var(--card-border);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+    color: var(--text-muted);
+    flex-shrink: 0;
+    transition: all 0.3s ease;
+}
+
+.step-node.running .step-icon {
+    border-color: var(--neon-blue);
+    color: var(--neon-blue);
+    box-shadow: 0 0 10px var(--neon-blue-glow);
+}
+
+.step-node.completed .step-icon {
+    border-color: var(--neon-emerald);
+    color: var(--neon-emerald);
+    background: rgba(0, 176, 155, 0.1);
+    box-shadow: 0 0 10px rgba(0, 176, 155, 0.15);
+}
+
+.step-icon i {
+    width: 15px;
+    height: 15px;
+}
+
+.step-spinner {
+    position: absolute;
+    top: -2px;
+    left: -2px;
+    right: -2px;
+    bottom: -2px;
+    border-radius: 50%;
+    border: 2px solid transparent;
+    border-top-color: var(--neon-blue);
+    display: none;
+    animation: spin 1.2s linear infinite;
+}
+
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+.step-node.running .step-spinner {
+    display: block;
+}
+
+.step-content h4 {
+    font-size: 14.5px;
+    font-weight: 600;
+    margin-bottom: 2px;
+    transition: color 0.3s ease;
+}
+
+.step-node.running .step-content h4 {
+    color: var(--neon-blue);
+}
+
+.step-node.completed .step-content h4 {
+    color: var(--text-primary);
+}
+
+.step-detail {
+    font-size: 11.5px;
+    color: var(--text-muted);
+    transition: color 0.3s ease;
+}
+
+.step-node.running .step-detail {
+    color: var(--text-secondary);
+}
+
+.step-node.completed .step-detail {
+    color: var(--neon-emerald);
+    font-weight: 500;
+}
+
+/* Console Logs Window styling */
+.console-wrapper {
+    flex: 1.2;
+    display: flex;
+    flex-direction: column;
+    background: #04070e;
+    border: 1px solid var(--card-border);
+    border-radius: 12px;
+    overflow: hidden;
+    height: 380px;
+    box-shadow: inset 0 0 15px rgba(0,0,0,0.9);
+}
+
+@media (min-width: 768px) {
+    .console-wrapper {
+        height: auto;
+    }
+}
+
+.console-header {
+    background: #0b0f19;
+    padding: 10px 16px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    border-bottom: 1px solid var(--card-border);
+}
+
+.console-dots {
+    display: flex;
+    gap: 6px;
+}
+
+.console-dots span {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    display: inline-block;
+}
+
+.dot-red { background: #ff5f56; }
+.dot-yellow { background: #ffbd2e; }
+.dot-green { background: #27c93f; }
+
+.console-title {
+    font-size: 11px;
+    font-family: var(--font-mono);
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.console-body {
+    padding: 16px;
+    overflow-y: auto;
+    flex: 1;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    line-height: 1.6;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.log-line {
+    word-break: break-all;
+    opacity: 0.95;
+    animation: fadeLog 0.2s ease-out;
+}
+
+@keyframes fadeLog {
+    from { opacity: 0; transform: translateY(2px); }
+    to { opacity: 0.95; transform: translateY(0); }
+}
+
+.log-system {
+    color: #6b7280;
+}
+
+.log-api {
+    color: var(--neon-blue);
+}
+
+.log-success {
+    color: var(--neon-emerald);
+}
+
+.log-warning {
+    color: var(--neon-yellow);
+}
+
