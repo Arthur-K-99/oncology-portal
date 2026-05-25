@@ -405,7 +405,7 @@ header {
     }
     
     /* Full width dashboard blocks */
-    .drug-card, .trials-card {
+    .trials-card {
         grid-column: span 2;
     }
 }
@@ -1182,5 +1182,34 @@ tbody tr:hover {
 
 .log-warning {
     color: var(--neon-yellow);
+}
+
+/* Macromolecular 3D Structure Card Styles */
+.structure-card .viewer-select {
+    background: rgba(0, 0, 0, 0.45) !important;
+    color: var(--text-primary) !important;
+    border: 1px solid rgba(255, 255, 255, 0.08) !important;
+    border-radius: 4px;
+    font-size: 10px;
+    padding: 3px 6px;
+    outline: none;
+    cursor: pointer;
+    font-family: var(--font-sans);
+    transition: border-color 0.2s ease;
+}
+
+.structure-card .viewer-select:focus {
+    border-color: var(--neon-blue) !important;
+}
+
+.structure-card .viewer-select option {
+    background: #0d1426;
+    color: var(--text-primary);
+}
+
+.structure-card .mol-container {
+    height: 320px;
+    width: 100%;
+    position: relative;
 }
 

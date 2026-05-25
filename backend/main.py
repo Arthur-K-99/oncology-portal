@@ -38,7 +38,8 @@ def run_cli_tool(tool_name: str, subcommand: str, extra_args: list[str]) -> Opti
         "gtex": "/Users/athanasios/.gemini/config/plugins/science/skills/gtex_database/scripts/gtex_cli.py",
         "opentargets": "/Users/athanasios/.gemini/config/plugins/science/skills/opentargets_database/scripts/query_opentargets.py",
         "chembl": "/Users/athanasios/.gemini/config/plugins/science/skills/chembl_database/scripts/chembl_api.py",
-        "clinicaltrials": "/Users/athanasios/.gemini/config/plugins/science/skills/clinical_trials_database/scripts/clinical_trials_api.py"
+        "clinicaltrials": "/Users/athanasios/.gemini/config/plugins/science/skills/clinical_trials_database/scripts/clinical_trials_api.py",
+        "uniprot": "/Users/athanasios/.gemini/config/plugins/science/skills/uniprot_database/scripts/uniprot_tools.py"
     }
     
     script_path = script_paths.get(tool_name)
@@ -53,7 +54,18 @@ def run_cli_tool(tool_name: str, subcommand: str, extra_args: list[str]) -> Opti
         # Build command line
         cmd = ["uv", "run", script_path]
         
-        if tool_name == "opentargets":
+        if tool_name == "uniprot":
+            cmd = ["uv", "run", script_path, subcommand] + extra_args
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=90)
+            if result.returncode != 0:
+                logger.error(f"CLI tool '{tool_name}' failed. Exit code: {result.returncode}\nStderr: {result.stderr}")
+                return None
+            try:
+                return json.loads(result.stdout)
+            except Exception as json_err:
+                logger.error(f"Failed to parse UniProt stdout: {json_err}\nStdout: {result.stdout[:200]}")
+                return None
+        elif tool_name == "opentargets":
             cmd.extend(["--output", temp_path, subcommand])
             cmd.extend(extra_args)
         elif tool_name == "dbsnp":
@@ -122,7 +134,8 @@ async def search_stream_generator(query: str):
         },
         "clinical_trials": {
             "trials": []
-        }
+        },
+        "protein": None
     }
     
     resolved_gene = None
@@ -440,6 +453,66 @@ async def search_stream_generator(query: str):
         yield f"data: {json.dumps({'step': 'trials', 'type': 'status', 'message': 'Clinical trials screening completed.'})}\n\n"
     else:
         yield f"data: {json.dumps({'step': 'trials', 'type': 'status', 'message': 'Skipped clinical trials (unresolved query).'})}\n\n"
+
+    # -------------------------------------------------------------
+    # STEP 6: MACROMOLECULAR 3D STRUCTURE (UniProt / PDB)
+    # -------------------------------------------------------------
+    yield f"data: {json.dumps({'step': 'structure', 'type': 'status', 'message': 'Resolving Macromolecular 3D Structure...'})}\n\n"
+    await asyncio.sleep(0.05)
+    
+    if resolved_gene:
+        yield f"data: {json.dumps({'step': 'structure', 'type': 'log', 'message': f'GET https://rest.uniprot.org/uniprotkb/search?query=gene:{resolved_gene}+AND+organism_id:9606+AND+reviewed:true'})}\n\n"
+        
+        uniprot_data = await asyncio.to_thread(run_cli_tool, "uniprot", "search", [
+            f"gene:{resolved_gene} AND organism_id:9606 AND reviewed:true",
+            "--fields", "accession,id,protein_name,xref_pdb",
+            "--format", "json"
+        ])
+        
+        if uniprot_data and "results" in uniprot_data and len(uniprot_data["results"]) > 0:
+            entry = uniprot_data["results"][0]
+            accession = entry.get("primaryAccession")
+            entry_name = entry.get("uniProtkbId")
+            
+            # Extract full recommended protein name
+            desc = entry.get("proteinDescription", {})
+            recommended = desc.get("recommendedName", {})
+            full_name = recommended.get("fullName", {}).get("value", f"{resolved_gene} protein")
+            
+            # Extract PDB references
+            pdb_refs = []
+            for xref in entry.get("uniProtKBCrossReferences", []):
+                if xref.get("database") == "PDB":
+                    props = {p.get("key"): p.get("value") for p in xref.get("properties", [])}
+                    pdb_refs.append({
+                        "id": xref.get("id"),
+                        "method": props.get("Method", "N/A"),
+                        "resolution": props.get("Resolution", "N/A"),
+                        "chains": props.get("Chains", "N/A")
+                    })
+            
+            # Sort PDB references by resolution (lower is better)
+            def sort_pdb(x):
+                res_str = x["resolution"].replace(" A", "").strip()
+                try:
+                    return float(res_str)
+                except ValueError:
+                    return 999.0
+            
+            pdb_refs.sort(key=sort_pdb)
+            
+            response_data["protein"] = {
+                "accession": accession,
+                "entry_name": entry_name,
+                "full_name": full_name,
+                "pdb_ids": pdb_refs[:15] # Top 15 structures
+            }
+            
+            yield f"data: {json.dumps({'step': 'structure', 'type': 'log', 'message': f'UniProt: Resolved accession {accession} ({entry_name}) with {len(pdb_refs)} PDB structures.'})}\n\n"
+        
+        yield f"data: {json.dumps({'step': 'structure', 'type': 'status', 'message': 'Macromolecular 3D structure compiled.'})}\n\n"
+    else:
+        yield f"data: {json.dumps({'step': 'structure', 'type': 'status', 'message': 'Skipped structure resolution (unresolved gene).'})}\n\n"
 
     # -------------------------------------------------------------
     # PIPELINE COMPLETE: STREAM DATA

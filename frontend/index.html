@@ -20,6 +20,9 @@
     <!-- Chart.js -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     
+    <!-- 3Dmol.js (3D Molecular Visualizer) -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/3Dmol/2.0.4/3Dmol-min.js"></script>
+    
     <!-- Local Stylesheet -->
     <link rel="stylesheet" href="/static/style.css">
 </head>
@@ -119,6 +122,17 @@
                         <div class="step-content">
                             <h4>Translational Clinical Trials</h4>
                             <p class="step-detail" id="detail-trials">Waiting for drug listings...</p>
+                        </div>
+                    </div>
+                    
+                    <div class="step-node" id="step-structure">
+                        <div class="step-icon">
+                            <i data-lucide="box"></i>
+                            <div class="step-spinner"></div>
+                        </div>
+                        <div class="step-content">
+                            <h4>Macromolecular 3D Structure</h4>
+                            <p class="step-detail" id="detail-structure">Waiting for clinical trials...</p>
                         </div>
                     </div>
                 </div>
@@ -308,7 +322,60 @@
                     </div>
                 </article>
 
-                <!-- 4. ClinicalTrials.gov Map/List Card -->
+                <!-- 4. Macromolecular 3D Structure Card -->
+                <article class="glass-card structure-card" id="card-structure">
+                    <div class="card-header">
+                        <i data-lucide="box" class="card-icon neon-blue"></i>
+                        <h3>Macromolecular 3D Structure</h3>
+                    </div>
+                    <div class="card-body">
+                        <!-- Protein details panel -->
+                        <div class="protein-meta-panel" style="display: flex; flex-direction: column; gap: 8px; margin-bottom: 16px; border-bottom: 1px solid rgba(255,255,255,0.03); padding-bottom: 12px; font-size: 13px;">
+                            <div style="display: flex; justify-content: space-between;">
+                                <span style="color: var(--text-muted);">Protein Name:</span>
+                                <span id="protein-name" style="font-weight: 500; text-align: right; max-width: 70%; word-break: break-word;">N/A</span>
+                            </div>
+                            <div style="display: flex; justify-content: space-between;">
+                                <span style="color: var(--text-muted);">UniProt ID:</span>
+                                <a href="#" id="protein-uniprot" target="_blank" style="color: var(--neon-purple); text-decoration: none; font-family: var(--font-mono); font-weight: 500;">N/A</a>
+                            </div>
+                        </div>
+
+                        <!-- 3D Viewer Container and Control Overlays -->
+                        <div class="viewer-wrapper" style="position: relative; border-radius: 12px; overflow: hidden; border: 1px solid var(--card-border); background: #04070e;">
+                            <div id="mol-viewer" style="height: 320px; width: 100%; position: relative;"></div>
+                            
+                            <!-- Style Controls Overlay -->
+                            <div class="viewer-controls" style="position: absolute; bottom: 10px; left: 10px; right: 10px; display: flex; flex-wrap: wrap; gap: 8px; background: rgba(13, 20, 38, 0.85); backdrop-filter: blur(8px); padding: 8px 12px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.05); font-size: 11px; z-index: 100;">
+                                <div style="display: flex; align-items: center; gap: 4px; flex: 1; min-width: 110px;">
+                                    <span style="color: var(--text-muted);">Model:</span>
+                                    <select id="viewer-model" class="viewer-select" style="flex: 1; max-width: 100px;">
+                                        <option value="alphafold">AlphaFold</option>
+                                    </select>
+                                </div>
+                                <div style="display: flex; align-items: center; gap: 4px; flex-shrink: 0;">
+                                    <span style="color: var(--text-muted);">Style:</span>
+                                    <select id="viewer-style" class="viewer-select">
+                                        <option value="cartoon">Cartoon</option>
+                                        <option value="sphere">Sphere</option>
+                                        <option value="stick">Stick</option>
+                                        <option value="line">Line</option>
+                                    </select>
+                                </div>
+                                <div style="display: flex; align-items: center; gap: 4px; flex-shrink: 0;">
+                                    <span style="color: var(--text-muted);">Color:</span>
+                                    <select id="viewer-color" class="viewer-select">
+                                        <option value="spectrum">Spectrum</option>
+                                        <option value="chain">Chain</option>
+                                        <option value="ss">Structure</option>
+                                    </select>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </article>
+
+                <!-- 5. ClinicalTrials.gov Map/List Card -->
                 <article class="glass-card trials-card" id="card-trials">
                     <div class="card-header">
                         <i data-lucide="map-pin" class="card-icon neon-emerald"></i>

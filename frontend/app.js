@@ -48,6 +48,7 @@ document.addEventListener('DOMContentLoaded', () => {
     let expressionChartInstance = null;
     let leafletMapInstance = null;
     let mapMarkersGroup = null;
+    let molViewerInstance = null;
     let currentData = null; // Caches results for filtering
 
     // -------------------------------------------------------------
@@ -64,7 +65,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Console Log & Pipeline helpers
     const consoleLog = document.getElementById('console-log');
-    const pipelineSteps = ['resolver', 'expression', 'druggability', 'pharmacology', 'trials'];
+    const pipelineSteps = ['resolver', 'expression', 'druggability', 'pharmacology', 'trials', 'structure'];
     
     function appendConsoleLog(text, className) {
         const line = document.createElement('div');
@@ -85,6 +86,7 @@ document.addEventListener('DOMContentLoaded', () => {
             else if (step === 'druggability') detail.textContent = 'Waiting for expression data...';
             else if (step === 'pharmacology') detail.textContent = 'Waiting for druggability profile...';
             else if (step === 'trials') detail.textContent = 'Waiting for drug listings...';
+            else if (step === 'structure') detail.textContent = 'Waiting for clinical trials...';
         });
         
         consoleLog.innerHTML = '<div class="log-line log-system">OncoPortal shell initialized. Ready for query analysis.</div>';
@@ -334,6 +336,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // 5. Render Clinical Trials
         renderClinicalTrials(data.clinical_trials.trials);
+
+        // 6. Render Macromolecular 3D Structure
+        renderProteinStructure(data.protein);
     }
 
     // ACMG Stars Rating converter
@@ -633,5 +638,92 @@ document.addEventListener('DOMContentLoaded', () => {
                 leafletMapInstance.fitBounds(mapMarkersGroup.getBounds(), { padding: [30, 30] });
             }, 200);
         }
+    }
+
+    // 6. Macromolecular 3D Structure Card rendering using 3Dmol.js
+    function renderProteinStructure(proteinData) {
+        const nameEl = document.getElementById('protein-name');
+        const uniprotEl = document.getElementById('protein-uniprot');
+        const modelSelect = document.getElementById('viewer-model');
+        const styleSelect = document.getElementById('viewer-style');
+        const colorSelect = document.getElementById('viewer-color');
+        
+        if (!proteinData) {
+            nameEl.textContent = 'Unavailable';
+            uniprotEl.textContent = 'N/A';
+            uniprotEl.href = '#';
+            modelSelect.innerHTML = '<option value="alphafold">N/A</option>';
+            document.getElementById('mol-viewer').innerHTML = '<div class="no-data">Protein structure data unavailable for this query.</div>';
+            return;
+        }
+
+        // Set metadata
+        nameEl.textContent = proteinData.full_name || 'Unknown Protein';
+        uniprotEl.textContent = proteinData.accession;
+        uniprotEl.href = `https://www.uniprot.org/uniprotkb/${proteinData.accession}/entry`;
+
+        // Populate models dropdown
+        modelSelect.innerHTML = `<option value="alphafold">AlphaFold (Computed)</option>`;
+        const pdbs = proteinData.pdb_ids || [];
+        pdbs.forEach(pdb => {
+            const opt = document.createElement('option');
+            opt.value = pdb.id;
+            opt.textContent = `${pdb.id} (${pdb.method} - ${pdb.resolution})`;
+            modelSelect.appendChild(opt);
+        });
+
+        // Initialize 3Dmol viewer if not done
+        if (!molViewerInstance) {
+            molViewerInstance = $3Dmol.createViewer(document.getElementById('mol-viewer'), {
+                defaultcolors: $3Dmol.rasmolElementColors
+            });
+        }
+
+        // Function to load and style the selected structure
+        function updateModel() {
+            if (!molViewerInstance) return;
+            molViewerInstance.clear();
+            
+            const modelVal = modelSelect.value;
+            const styleVal = styleSelect.value;
+            const colorVal = colorSelect.value;
+            
+            let downloadUrl = '';
+            if (modelVal === 'alphafold') {
+                downloadUrl = `url:https://alphafold.ebi.ac.uk/files/AF-${proteinData.accession}-F1-model_v4.pdb`;
+            } else {
+                downloadUrl = `pdb:${modelVal}`;
+            }
+
+            $3Dmol.download(downloadUrl, molViewerInstance, {}, function() {
+                // Apply Styles
+                const styleObj = {};
+                let colorScheme = colorVal;
+                if (colorVal === 'ss') {
+                    colorScheme = 'secondaryStructure';
+                }
+                styleObj[styleVal] = { colorscheme: colorScheme };
+                
+                molViewerInstance.setStyle({}, styleObj);
+                molViewerInstance.zoomTo();
+                molViewerInstance.render();
+                molViewerInstance.spin(true);
+            });
+        }
+
+        // Add event listeners (remove old ones if any)
+        modelSelect.onchange = updateModel;
+        styleSelect.onchange = updateModel;
+        colorSelect.onchange = updateModel;
+
+        // Initial render
+        updateModel();
+        
+        // Trigger resize handling to ensure WebGL canvas sizes properly
+        setTimeout(() => {
+            if (molViewerInstance) {
+                molViewerInstance.resize();
+            }
+        }, 300);
     }
 });
