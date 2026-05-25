@@ -1,0 +1,25 @@
+# Python virtual environments
+.venv/
+venv/
+ENV/
+env/
+
+# Python cache and bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+
+# OS generated files
+.DS_Store
+.DS_Store?
+ehthumbs.db
+Icon?
+Thumbs.db
+
+# IDE configuration files
+.vscode/
+.idea/
+
+# Local outputs / temporary testing
+/tmp/
+*.log

@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Oncology Variant & Drug Repurposing Portal</title>
+    
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    
+    <!-- Lucide Icons (clean and modern) -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    
+    <!-- Leaflet.js (Map library) -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+    
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    
+    <!-- Local Stylesheet -->
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <!-- Background elements for depth and glow -->
+    <div class="bg-glow bg-glow-1"></div>
+    <div class="bg-glow bg-glow-2"></div>
+    <div class="bg-glow bg-glow-3"></div>
+
+    <div class="container">
+        <!-- Header Section -->
+        <header>
+            <div class="logo">
+                <i data-lucide="dna" class="logo-icon"></i>
+                <div class="logo-text">
+                    <h1>ONCO<span>PORTAL</span></h1>
+                    <p>Oncology Variant & Drug Repurposing Pipeline</p>
+                </div>
+            </div>
+            
+            <!-- Search Bar Container -->
+            <div class="search-section">
+                <form id="search-form" class="search-bar">
+                    <i data-lucide="search" class="search-icon"></i>
+                    <input type="text" id="search-input" placeholder="Enter cancer gene (e.g. EGFR, TP53) or rsID (e.g. rs121913343)..." required autofocus>
+                    <button type="submit" class="search-btn">
+                        <span>Analyze</span>
+                        <i data-lucide="arrow-right"></i>
+                    </button>
+                </form>
+                <div class="quick-examples">
+                    <span class="label">Quick Search:</span>
+                    <button class="example-badge" type="button" data-val="rs121913343">rs121913343 (TP53 Var)</button>
+                    <button class="example-badge" type="button" data-val="EGFR">EGFR (Gene)</button>
+                    <button class="example-badge" type="button" data-val="BRAF">BRAF (Gene)</button>
+                    <button class="example-badge" type="button" data-val="rs113993960">rs113993960 (CFTR Var)</button>
+                </div>
+            </div>
+        </header>
+
+        <!-- Loader Container -->
+        <div id="loader" class="loader-container hidden">
+            <div class="spinner">
+                <div class="double-bounce1"></div>
+                <div class="double-bounce2"></div>
+            </div>
+            <p>Running pipeline query across ClinVar, dbSNP, GTEx, Open Targets, ChEMBL, & ClinicalTrials.gov...</p>
+        </div>
+
+        <!-- Initial Placeholder State -->
+        <div id="placeholder-state" class="glass-card placeholder-card">
+            <i data-lucide="flask-conical" class="placeholder-icon"></i>
+            <h2>Start Clinical Genomic Repurposing Analysis</h2>
+            <p>Enter a cancer-associated gene symbol or a genomic variant rsID to map variants, check clinical pathogenicity, analyze GTEx baseline expression, discover binding compounds, and screen recruiting clinical trials.</p>
+        </div>
+
+        <!-- Dashboard Grid (Visible after loading query) -->
+        <main id="dashboard" class="hidden">
+            <!-- Search Context Header Card -->
+            <section class="context-card glass-card">
+                <div class="context-details">
+                    <span class="search-type-badge" id="meta-type">GENE</span>
+                    <h2 id="meta-title">EGFR</h2>
+                    <p id="meta-subtitle">Epidermal Growth Factor Receptor</p>
+                </div>
+                <div class="context-extra" id="meta-coords-container">
+                    <span class="extra-label">Genomic Placement (GRCh38)</span>
+                    <code id="meta-coords">chr7:55019017-55211628</code>
+                </div>
+            </section>
+
+            <!-- Dashboard Grid Blocks -->
+            <div class="dashboard-grid">
+                
+                <!-- 1. ClinVar Pathogenicity Card -->
+                <article class="glass-card pathogenicity-card" id="card-pathogenicity">
+                    <div class="card-header">
+                        <i data-lucide="shield-alert" class="card-icon neon-red"></i>
+                        <h3>ClinVar Pathogenicity</h3>
+                    </div>
+                    <div class="card-body">
+                        <!-- Single Variant View -->
+                        <div id="single-var-view" class="hidden">
+                            <div class="significance-badge-container">
+                                <span class="sig-badge" id="var-sig">Pathogenic</span>
+                                <div class="review-stars" id="var-stars">
+                                    <!-- Stars rendered by JS -->
+                                </div>
+                            </div>
+                            <h4 id="var-title" class="variant-name">NM_000059.3(BRCA2):c.7007G>A (p.Arg2336His)</h4>
+                            <ul class="variant-specs">
+                                <li>
+                                    <span class="spec-label">Review Status:</span>
+                                    <span class="spec-value" id="var-review-status">reviewed by expert panel</span>
+                                </li>
+                                <li>
+                                    <span class="spec-label">Last Evaluated:</span>
+                                    <span class="spec-value" id="var-last-eval">2021-08-14</span>
+                                </li>
+                                <li>
+                                    <span class="spec-label">Variation Type:</span>
+                                    <span class="spec-value" id="var-type">single nucleotide variant</span>
+                                </li>
+                            </ul>
+                            <div class="phenotypes-list-container">
+                                <h5>Associated Phenotypes / Conditions</h5>
+                                <div class="pills-flex" id="var-phenotypes">
+                                    <!-- Phenotype pills -->
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Gene Pathogenic Variants View (when searching by Gene) -->
+                        <div id="gene-var-view" class="hidden">
+                            <p class="description">Top pathogenic variants reported in ClinVar for this gene:</p>
+                            <div class="table-container">
+                                <table class="variants-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Variant Nomenclature</th>
+                                            <th>Significance</th>
+                                            <th>Stars</th>
+                                            <th>Last Evaluated</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="gene-variants-list">
+                                        <!-- Table rows -->
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </article>
+
+                <!-- 2. GTEx Tissue Baseline Expression Card -->
+                <article class="glass-card expression-card" id="card-expression">
+                    <div class="card-header">
+                        <i data-lucide="bar-chart-3" class="card-icon neon-blue"></i>
+                        <h3>GTEx Tissue Baseline Expression</h3>
+                    </div>
+                    <div class="card-body">
+                        <p class="description">Baseline mRNA abundance across top tissues (expressed in TPM - Transcripts Per Million):</p>
+                        <div class="chart-container">
+                            <canvas id="expression-chart"></canvas>
+                        </div>
+                    </div>
+                </article>
+
+                <!-- 3. ChEMBL & Open Targets Drug Discovery Card -->
+                <article class="glass-card drug-card" id="card-drug">
+                    <div class="card-header">
+                        <i data-lucide="pill" class="card-icon neon-purple"></i>
+                        <h3>Drug Discovery & Repurposing</h3>
+                    </div>
+                    <div class="card-body">
+                        <!-- Open Targets Druggability Badges -->
+                        <div class="druggability-section">
+                            <h5>Target Tractability (Open Targets)</h5>
+                            <div class="pills-flex" id="tractability-badges">
+                                <!-- Tractability badges (SM Approved, Antibody, etc.) -->
+                            </div>
+                        </div>
+                        
+                        <!-- Tabs -->
+                        <div class="tabs-container">
+                            <div class="tabs-header">
+                                <button class="tab-btn active" data-tab="tab-approved">
+                                    <i data-lucide="shield-check"></i> Approved & Investigational Drugs
+                                </button>
+                                <button class="tab-btn" data-tab="tab-affinity">
+                                    <i data-lucide="flame"></i> Binding Affinities (IC50)
+                                </button>
+                            </div>
+                            
+                            <!-- Tab 1: Approved Drugs and Mechanisms -->
+                            <div class="tab-content active" id="tab-approved">
+                                <div class="table-container">
+                                    <table class="data-table">
+                                        <thead>
+                                            <tr>
+                                                <th>Drug / Compound</th>
+                                                <th>Modality</th>
+                                                <th>Max Clinical Phase</th>
+                                                <th>Mechanism of Action</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="approved-drugs-list">
+                                            <!-- Rows -->
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                            
+                            <!-- Tab 2: Binding Affinities -->
+                            <div class="tab-content" id="tab-affinity">
+                                <p class="description">Bioactivity assays indicating strong binding affinity for target protein (lowest IC50 is strongest):</p>
+                                <div class="table-container">
+                                    <table class="data-table">
+                                        <thead>
+                                            <tr>
+                                                <th>ChEMBL Assay ID</th>
+                                                <th>Standard Type</th>
+                                                <th>Reported Value</th>
+                                                <th>Binding Affinity (IC50 in nM)</th>
+                                                <th>Reference Document</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="binding-affinities-list">
+                                            <!-- Rows -->
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </article>
+
+                <!-- 4. ClinicalTrials.gov Map/List Card -->
+                <article class="glass-card trials-card" id="card-trials">
+                    <div class="card-header">
+                        <i data-lucide="map-pin" class="card-icon neon-emerald"></i>
+                        <h3>Active Clinical Trials Map & Recruiting Sites</h3>
+                    </div>
+                    <div class="card-body">
+                        <div class="trials-layout">
+                            <!-- Left / Top: Interactive Map -->
+                            <div class="map-wrapper">
+                                <div id="trials-map"></div>
+                            </div>
+                            
+                            <!-- Right / Bottom: Scrollable List -->
+                            <div class="trials-list-section">
+                                <div class="trials-list-header">
+                                    <h5>Recruiting Clinical Trials</h5>
+                                    <div class="filter-group">
+                                        <select id="trial-phase-filter">
+                                            <option value="ALL">All Phases</option>
+                                            <option value="PHASE1">Phase 1</option>
+                                            <option value="PHASE2">Phase 2</option>
+                                            <option value="PHASE3">Phase 3</option>
+                                            <option value="PHASE4">Phase 4</option>
+                                        </select>
+                                    </div>
+                                </div>
+                                <div class="trials-scroll-list" id="trials-list">
+                                    <!-- Trial entries -->
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </article>
+                
+            </div>
+        </main>
+    </div>
+
+    <!-- Script Files -->
+    <script src="/static/app.js"></script>
+</body>
+</html>
