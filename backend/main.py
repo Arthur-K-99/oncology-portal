@@ -284,13 +284,41 @@ async def search_stream_generator(query: str):
         
         if chembl_target and "targets" in chembl_target:
             targets = chembl_target["targets"]
+            
+            # Step 1: Look for exact match in pref_name or target component synonyms
             for t in targets:
                 if t.get("target_type") == "SINGLE PROTEIN" and t.get("tax_id") == 9606:
                     pref_name = t.get("pref_name", "").upper()
-                    if resolved_gene in pref_name or resolved_gene in [syn.get("component_synonym", "").upper() for syn in t.get("target_components", [])]:
+                    synonyms = []
+                    for comp in t.get("target_components", []):
+                        for syn_obj in comp.get("target_component_synonyms", []):
+                            syn_val = syn_obj.get("component_synonym")
+                            if syn_val:
+                                synonyms.append(syn_val.upper())
+                    
+                    if resolved_gene == pref_name or resolved_gene in synonyms:
                         target_chembl_id = t.get("target_chembl_id")
                         response_data["chembl"]["target_id"] = target_chembl_id
                         break
+            
+            # Step 2: Fall back to substring match if no exact match found
+            if not target_chembl_id:
+                for t in targets:
+                    if t.get("target_type") == "SINGLE PROTEIN" and t.get("tax_id") == 9606:
+                        pref_name = t.get("pref_name", "").upper()
+                        synonyms = []
+                        for comp in t.get("target_components", []):
+                            for syn_obj in comp.get("target_component_synonyms", []):
+                                syn_val = syn_obj.get("component_synonym")
+                                if syn_val:
+                                    synonyms.append(syn_val.upper())
+                                    
+                        if resolved_gene in pref_name or any(resolved_gene in syn for syn in synonyms):
+                            target_chembl_id = t.get("target_chembl_id")
+                            response_data["chembl"]["target_id"] = target_chembl_id
+                            break
+                            
+            # Step 3: Fall back to first human single protein target if still no match
             if not target_chembl_id:
                 for t in targets:
                     if t.get("target_type") == "SINGLE PROTEIN" and t.get("tax_id") == 9606:
